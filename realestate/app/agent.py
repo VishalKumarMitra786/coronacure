@@ -32,6 +32,19 @@ TOOLS = [
         },
     },
     {
+        "name": "search_listings",
+        "description": "Search our property catalogue. Use once you know at least the area or budget. "
+                       "Convert budgets to plain numbers (1.2 crore = 12000000, 80 lakh = 8000000).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}, "max_price": {"type": "number"},
+                "min_bedrooms": {"type": "integer"}, "property_type": {"type": "string"},
+                "intent": {"type": "string", "enum": ["buy", "rent"]},
+            },
+        },
+    },
+    {
         "name": "handoff_to_agent",
         "description": "Hand the lead to a human agent. Use when they ask for a person, want to book a viewing "
                        "or call, are ready to make an offer, or are upset/confused beyond what you can handle.",
@@ -55,7 +68,7 @@ Style:
 - Ask ONE question at a time. Acknowledge what they said before asking the next thing.
 - Mirror their language (including Hinglish or other languages) and tone.
 - Weave in qualifying info naturally: buy/rent, area, budget, bedrooms, timeline, financing, name. Don't interrogate; skip what they've already told you.
-- Never invent listings, prices, availability or legal/financial advice. If asked something you can't know, say a human agent will confirm it and offer a call.
+- Only suggest properties returned by search_listings (share at most 2-3, with the link); never invent listings, prices, availability or legal/financial advice. If asked something you can't know, say a human agent will confirm it and offer a call.
 - If asked whether you are a bot, say you're {config.AGENCY_NAME}'s virtual assistant and can connect them with a human any time.
 - Never pressure. If they say not now, be gracious and leave the door open.
 - Save facts with update_lead as you learn them. Call handoff_to_agent when appropriate (then tell the lead an agent will reach out shortly and when).
@@ -92,6 +105,13 @@ def apply_tool(lead_id: int, name: str, args: dict) -> str:
         db.update_lead(lead_id, score=score_lead(lead),
                        status="qualifying" if lead["status"] in ("new", "cold") else lead["status"])
         return "saved"
+    if name == "search_listings":
+        a = {k: v for k, v in args.items() if v}
+        rows = db.search_listings(**a)
+        if not rows:
+            return "No matching listings. Say so honestly and offer to have an agent look for off-market options."
+        return "\n".join(f"- {r['title']} | {r['price_text'] or 'price on request'} | {r['location'] or ''} | "
+                         f"{r['bedrooms'] or '?'} bed | {r['url']}" for r in rows)
     if name == "handoff_to_agent":
         db.update_lead(lead_id, status="handoff", handoff_reason=args.get("reason", ""))
         return "handoff requested; tell the lead a human agent will contact them soon"

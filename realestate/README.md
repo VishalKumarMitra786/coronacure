@@ -32,3 +32,16 @@ uvicorn app.main:app --reload
 ## Before going live
 Only message people who contacted you or opted in; keep the STOP handling; review local rules on messaging consent
 (e.g. TRAI/DND in India, TCPA in the US). Replace SQLite and the in-process scheduler if you run multiple instances.
+
+## Property catalogue scraper
+Pulls listings into SQLite so the bot can suggest real properties (`search_listings` tool).
+```bash
+export CATALOGUE_URL=https://your-agency.example/listings
+export SCRAPER_USER_AGENT="YourAgencyBot/1.0 (you@example.com)"
+python -m app.scraper          # or POST /api/scrape?token=...
+```
+- Uses schema.org JSON-LD if the page has it; otherwise CSS selectors. Copy the keys from `DEFAULT_CONFIG` in
+  `app/scraper.py` into a JSON file and point `SCRAPER_CONFIG` at it to match your site's markup.
+- Follows pagination (`next_page`), respects robots.txt, waits `SCRAPER_DELAY_S` between requests.
+- Listings that disappear from the site are deactivated; an empty/failed scrape never wipes the catalogue.
+- Only scrape sites you own or have permission to scrape. Run it on a schedule (cron) to keep the catalogue fresh.

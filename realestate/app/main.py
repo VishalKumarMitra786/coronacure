@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, HTTPException, Header, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from . import config, db, agent, whatsapp, notify, followups
+from . import config, db, agent, whatsapp, notify, followups, scraper
 
 STOP_WORDS = {"stop", "unsubscribe", "cancel", "opt out", "optout"}
 
@@ -93,6 +93,11 @@ def simulate(s: Sim, token: str = Query(None)):
 def run_followups(token: str = Query(None)):
     auth(token)
     return {"sent": followups.run_once()}
+
+@app.post("/api/scrape")
+def run_scrape(token: str = Query(None)):
+    auth(token)
+    return {"listings": scraper.run()}
 
 @app.get("/")
 @app.get("/dashboard")

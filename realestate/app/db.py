@@ -63,3 +63,41 @@ def due_candidates():
         return [dict(r) for r in c.execute(
             "SELECT * FROM leads WHERE status NOT IN ('opted_out','cold','handoff') "
             "AND last_outbound_at IS NOT NULL")]
+
+LISTING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS listings(
+  id INTEGER PRIMARY KEY, url TEXT UNIQUE NOT NULL, title TEXT, price_text TEXT, price_num REAL,
+  location TEXT, bedrooms INTEGER, property_type TEXT, intent TEXT, image TEXT, description TEXT,
+  active INTEGER DEFAULT 1, last_seen REAL);
+"""
+
+def upsert_listings(items, scrape_started):
+    """Insert/update scraped listings; deactivate ones no longer on the site."""
+    with conn() as c:
+        c.executescript(LISTING_SCHEMA)
+        for it in items:
+            c.execute("""INSERT INTO listings(url,title,price_text,price_num,location,bedrooms,property_type,
+                         intent,image,description,active,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+                         ON CONFLICT(url) DO UPDATE SET title=excluded.title, price_text=excluded.price_text,
+                         price_num=excluded.price_num, location=excluded.location, bedrooms=excluded.bedrooms,
+                         property_type=excluded.property_type, intent=excluded.intent, image=excluded.image,
+                         description=excluded.description, active=1, last_seen=excluded.last_seen""",
+                      (it["url"], it.get("title"), it.get("price_text"), it.get("price_num"), it.get("location"),
+                       it.get("bedrooms"), it.get("property_type"), it.get("intent"), it.get("image"),
+                       it.get("description"), scrape_started))
+        # only deactivate if the scrape found something (a failed scrape must not wipe the catalogue)
+        if items:
+            c.execute("UPDATE listings SET active=0 WHERE last_seen < ?", (scrape_started,))
+
+def search_listings(location=None, max_price=None, min_bedrooms=None, property_type=None, intent=None, limit=3):
+    q, args = "SELECT * FROM listings WHERE active=1", []
+    if location:
+        q += " AND (location LIKE ? OR title LIKE ?)"; args += [f"%{location}%"] * 2
+    if max_price: q += " AND (price_num IS NULL OR price_num <= ?)"; args.append(max_price)
+    if min_bedrooms: q += " AND (bedrooms IS NULL OR bedrooms >= ?)"; args.append(min_bedrooms)
+    if property_type: q += " AND property_type LIKE ?"; args.append(f"%{property_type}%")
+    if intent: q += " AND (intent IS NULL OR intent = ?)"; args.append(intent)
+    q += " ORDER BY price_num DESC LIMIT ?"; args.append(limit)
+    with conn() as c:
+        c.executescript(LISTING_SCHEMA)
+        return [dict(r) for r in c.execute(q, args)]
