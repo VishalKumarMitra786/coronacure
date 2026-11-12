@@ -1,0 +1,4 @@
+realestate/leads.db
+realestate/.env
+__pycache__/
+.pytest_cache/
