@@ -3,7 +3,7 @@ import os
 def env(name, default=""):
     return os.environ.get(name, default)
 
-MODEL = env("CLAUDE_MODEL", "claude-opus-5-5")
+MODEL = env("CLAUDE_MODEL", "claude-sonnet-5-5")
 AGENT_NAME = env("AGENT_NAME", "Priya")
 AGENCY_NAME = env("AGENCY_NAME", "Your Realty")
 DASHBOARD_TOKEN = env("DASHBOARD_TOKEN", "change-me")
