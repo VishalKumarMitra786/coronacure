@@ -79,7 +79,7 @@ def _text(resp):
 
 def _call(system, messages, tools=None):
     kw = dict(model=config.MODEL, max_tokens=1024, system=system, messages=messages,
-              output_config={"effort": "low"})
+              output_config={"effort": "medium"})
     if tools:
         kw["tools"] = tools
     return client().messages.create(**kw)
