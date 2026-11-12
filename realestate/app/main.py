@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, HTTPException, Header, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from . import config, db, agent, whatsapp, notify, followups, scraper
+from . import config, db, agent, whatsapp, notify, followups, scraper, sources
 
 STOP_WORDS = {"stop", "unsubscribe", "cancel", "opt out", "optout"}
 
@@ -94,10 +94,33 @@ def run_followups(token: str = Query(None)):
     auth(token)
     return {"sent": followups.run_once()}
 
+class Src(BaseModel):
+    url: str
+
+@app.get("/api/sources")
+def get_sources(token: str = Query(None)):
+    auth(token)
+    return sources.list_sources()
+
+@app.post("/api/sources")
+def add_source(s: Src, token: str = Query(None)):
+    """Adding a URL approves that site for scraping."""
+    auth(token)
+    try:
+        return sources.add_source(s.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.delete("/api/sources/{source_id}")
+def del_source(source_id: int, token: str = Query(None)):
+    auth(token)
+    sources.remove_source(source_id)
+    return {"ok": True}
+
 @app.post("/api/scrape")
 def run_scrape(token: str = Query(None)):
     auth(token)
-    return {"listings": scraper.run()}
+    return sources.refresh_all()
 
 @app.get("/")
 @app.get("/dashboard")

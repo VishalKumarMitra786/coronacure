@@ -33,15 +33,19 @@ uvicorn app.main:app --reload
 Only message people who contacted you or opted in; keep the STOP handling; review local rules on messaging consent
 (e.g. TRAI/DND in India, TCPA in the US). Replace SQLite and the in-process scheduler if you run multiple instances.
 
-## Property catalogue scraper
-Pulls listings into SQLite so the bot can suggest real properties (`search_listings` tool).
+## Property catalogue (auto-learning scraper)
+Approve sites, and the bot builds its own catalogue from them (`search_listings` tool).
 ```bash
-export CATALOGUE_URL=https://your-agency.example/listings
 export SCRAPER_USER_AGENT="YourAgencyBot/1.0 (you@example.com)"
-python -m app.scraper          # or POST /api/scrape?token=...
+curl -XPOST "localhost:8000/api/sources?token=$DASHBOARD_TOKEN" -H 'content-type: application/json' \
+     -d '{"url":"https://your-agency.example/listings"}'      # adding a URL = approving that site
+curl -XPOST "localhost:8000/api/scrape?token=$DASHBOARD_TOKEN"   # or: python -m app.sources
 ```
-- Uses schema.org JSON-LD if the page has it; otherwise CSS selectors. Copy the keys from `DEFAULT_CONFIG` in
-  `app/scraper.py` into a JSON file and point `SCRAPER_CONFIG` at it to match your site's markup.
-- Follows pagination (`next_page`), respects robots.txt, waits `SCRAPER_DELAY_S` between requests.
-- Listings that disappear from the site are deactivated; an empty/failed scrape never wipes the catalogue.
-- Only scrape sites you own or have permission to scrape. Run it on a schedule (cron) to keep the catalogue fresh.
+- **Auto-learns layouts:** if the page has schema.org JSON-LD it uses that; otherwise Claude proposes CSS selectors,
+  they are test-run on the page (one retry with feedback), and the working set is stored per site. If a site later
+  returns nothing, selectors are re-learned once.
+- **Safe by design:** only approved sites, never leaves the approved domain, obeys robots.txt, rate-limited.
+  One site failing never deactivates another site's listings; listings that vanish from a site are deactivated.
+- `GET /api/sources` shows status, last count and errors per site; `DELETE /api/sources/{id}` removes one.
+- Plain HTML only: JavaScript-rendered sites report an error (headless-browser support is a possible next step).
+- Only approve sites you own or have permission to scrape. Run `/api/scrape` on a cron to keep it fresh.

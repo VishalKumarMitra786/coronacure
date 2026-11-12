@@ -68,26 +68,38 @@ LISTING_SCHEMA = """
 CREATE TABLE IF NOT EXISTS listings(
   id INTEGER PRIMARY KEY, url TEXT UNIQUE NOT NULL, title TEXT, price_text TEXT, price_num REAL,
   location TEXT, bedrooms INTEGER, property_type TEXT, intent TEXT, image TEXT, description TEXT,
-  active INTEGER DEFAULT 1, last_seen REAL);
+  active INTEGER DEFAULT 1, last_seen REAL, source_id INTEGER);
+CREATE TABLE IF NOT EXISTS sources(
+  id INTEGER PRIMARY KEY, url TEXT UNIQUE NOT NULL, domain TEXT, config TEXT,
+  status TEXT DEFAULT 'new', last_count INTEGER, last_scraped REAL, error TEXT);
 """
 
-def upsert_listings(items, scrape_started):
-    """Insert/update scraped listings; deactivate ones no longer on the site."""
-    with conn() as c:
-        c.executescript(LISTING_SCHEMA)
+def _listing_conn():
+    c = conn()
+    c.executescript(LISTING_SCHEMA)
+    try:
+        c.execute("ALTER TABLE listings ADD COLUMN source_id INTEGER")  # DBs created before sources existed
+    except sqlite3.OperationalError:
+        pass
+    return c
+
+def upsert_listings(items, scrape_started, source_id=0):
+    """Insert/update one source's listings; deactivate that source's listings no longer on the site."""
+    with _listing_conn() as c:
         for it in items:
             c.execute("""INSERT INTO listings(url,title,price_text,price_num,location,bedrooms,property_type,
-                         intent,image,description,active,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+                         intent,image,description,active,last_seen,source_id) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?)
                          ON CONFLICT(url) DO UPDATE SET title=excluded.title, price_text=excluded.price_text,
                          price_num=excluded.price_num, location=excluded.location, bedrooms=excluded.bedrooms,
                          property_type=excluded.property_type, intent=excluded.intent, image=excluded.image,
-                         description=excluded.description, active=1, last_seen=excluded.last_seen""",
+                         description=excluded.description, active=1, last_seen=excluded.last_seen,
+                         source_id=excluded.source_id""",
                       (it["url"], it.get("title"), it.get("price_text"), it.get("price_num"), it.get("location"),
                        it.get("bedrooms"), it.get("property_type"), it.get("intent"), it.get("image"),
-                       it.get("description"), scrape_started))
+                       it.get("description"), scrape_started, source_id))
         # only deactivate if the scrape found something (a failed scrape must not wipe the catalogue)
         if items:
-            c.execute("UPDATE listings SET active=0 WHERE last_seen < ?", (scrape_started,))
+            c.execute("UPDATE listings SET active=0 WHERE source_id=? AND last_seen < ?", (source_id, scrape_started))
 
 def search_listings(location=None, max_price=None, min_bedrooms=None, property_type=None, intent=None, limit=3):
     q, args = "SELECT * FROM listings WHERE active=1", []
@@ -98,6 +110,5 @@ def search_listings(location=None, max_price=None, min_bedrooms=None, property_t
     if property_type: q += " AND property_type LIKE ?"; args.append(f"%{property_type}%")
     if intent: q += " AND (intent IS NULL OR intent = ?)"; args.append(intent)
     q += " ORDER BY price_num DESC LIMIT ?"; args.append(limit)
-    with conn() as c:
-        c.executescript(LISTING_SCHEMA)
+    with _listing_conn() as c:
         return [dict(r) for r in c.execute(q, args)]

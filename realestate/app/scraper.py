@@ -95,19 +95,24 @@ def from_selectors(soup, base, cfg):
                     "image": urljoin(base, img["src"]) if img and img.get("src") else None})
     return out
 
+def make_fetcher(start):
+    """Polite fetcher: obeys robots.txt, rate-limits, identifies itself."""
+    root = f"{urlparse(start).scheme}://{urlparse(start).netloc}"
+    rp = RobotFileParser(root + "/robots.txt"); rp.read()
+    client = httpx.Client(headers={"User-Agent": UA}, timeout=20, follow_redirects=True)
+    def fetch(url):
+        if not rp.can_fetch(UA, url): raise PermissionError(f"robots.txt disallows {url}")
+        time.sleep(DELAY_S)
+        r = client.get(url); r.raise_for_status(); return r.text
+    return fetch
+
 def scrape(cfg=None, fetch=None):
-    """Returns the list of listings found. `fetch(url)->html` is injectable for tests."""
+    """Returns the listings found. `fetch(url)->html` is injectable for tests. Never leaves the start domain."""
     cfg = cfg or load_config()
     start = cfg["start_url"]
     if not start: raise SystemExit("Set CATALOGUE_URL (or start_url in SCRAPER_CONFIG).")
-    root = f"{urlparse(start).scheme}://{urlparse(start).netloc}"
-    if fetch is None:
-        rp = RobotFileParser(root + "/robots.txt"); rp.read()
-        client = httpx.Client(headers={"User-Agent": UA}, timeout=20, follow_redirects=True)
-        def fetch(url):
-            if not rp.can_fetch(UA, url): raise PermissionError(f"robots.txt disallows {url}")
-            time.sleep(DELAY_S)
-            r = client.get(url); r.raise_for_status(); return r.text
+    domain = urlparse(start).netloc
+    fetch = fetch or make_fetcher(start)
     items, seen, url = {}, set(), start
     for _ in range(MAX_PAGES):
         if url in seen: break
@@ -115,11 +120,13 @@ def scrape(cfg=None, fetch=None):
         soup = BeautifulSoup(fetch(url), "html.parser")
         found = from_jsonld(soup, url) or from_selectors(soup, url, cfg)
         for it in found:
+            if urlparse(it["url"]).netloc != domain: continue
             it.setdefault("intent", cfg.get("default_intent"))
             items[it["url"]] = it
         nxt = soup.select_one(cfg["next_page"]) if cfg.get("next_page") else None
         if not (nxt and nxt.get("href")): break
         url = urljoin(url, nxt["href"])
+        if urlparse(url).netloc != domain: break
     return list(items.values())
 
 def run(cfg=None, fetch=None):
