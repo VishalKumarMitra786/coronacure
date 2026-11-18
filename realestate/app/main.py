@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, HTTPException, Header, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from . import config, db, agent, whatsapp, notify, followups, scraper, sources
+from . import config, db, agent, whatsapp, notify, followups, scraper, sources, crawler
 
 STOP_WORDS = {"stop", "unsubscribe", "cancel", "opt out", "optout"}
 
@@ -116,6 +116,17 @@ def del_source(source_id: int, token: str = Query(None)):
     auth(token)
     sources.remove_source(source_id)
     return {"ok": True}
+
+class Area(BaseModel):
+    area: str
+
+@app.post("/api/discover")
+def discover(a: Area, token: str = Query(None)):
+    """Find agency sites for an area on the web, approve them, crawl them (no URL or API key needed)."""
+    auth(token)
+    urls = crawler.discover(a.area)
+    added = [sources.add_source(u)["url"] for u in urls]
+    return {"sites": added, "results": sources.refresh_all()}
 
 @app.post("/api/scrape")
 def run_scrape(token: str = Query(None)):

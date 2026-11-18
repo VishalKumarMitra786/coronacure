@@ -49,3 +49,16 @@ curl -XPOST "localhost:8000/api/scrape?token=$DASHBOARD_TOKEN"   # or: python -m
 - `GET /api/sources` shows status, last count and errors per site; `DELETE /api/sources/{id}` removes one.
 - Plain HTML only: JavaScript-rendered sites report an error (headless-browser support is a possible next step).
 - Only approve sites you own or have permission to scrape. Run `/api/scrape` on a cron to keep it fresh.
+
+## Keyless web crawling (no URL or API key needed for the catalogue)
+```bash
+python -m app.crawler "Whitefield Bangalore"     # or: POST /api/discover {"area": "..."}
+```
+- **Discovery:** reads `SEED_URLS` / `seeds.txt` if present; otherwise queries a search page *only if its robots.txt
+  allows automated access* (many engines don't - then it tells you and finds nothing; add a few agency sites to `seeds.txt`).
+- **Crawl:** same-domain BFS (listing-like links first, `CRAWL_MAX_PAGES`=60), robots.txt + delay respected.
+  Extraction needs no LLM: JSON-LD if present, else a heuristic (detail page with one price + bedrooms/type + title).
+- **Skipped on purpose:** big portals (99acres, MagicBricks, Zillow, Rightmove, ...) - their terms forbid scraping.
+  Extend with `BLOCKED_DOMAINS`.
+- Sources added without an `ANTHROPIC_API_KEY` (or where selector-learning fails) automatically use the crawler.
+- The WhatsApp *chat* itself still needs Claude access (`ANTHROPIC_API_KEY`).

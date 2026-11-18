@@ -1,8 +1,8 @@
 """Approved catalogue sources. Adding a URL = approving that domain. Claude learns each site's layout."""
-import json, time
+import json, os, time
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-from . import db, agent, scraper
+from . import db, agent, scraper, crawler
 
 CONFIG_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -79,7 +79,12 @@ def refresh_source(src, fetch=None):
     cfg = json.loads(src["config"]) if src["config"] else None
     try:
         if cfg is None:
-            cfg = _learn_and_verify(src["url"], fetch)
+            cfg = _choose_config(src["url"], fetch)
+        if cfg.get("crawl"):
+            items = crawler.crawl_site(src["url"], fetch)
+            if not items: raise ValueError("crawled the site but found no listing pages")
+            db.upsert_listings(items, started, source_id=src["id"])
+            return _record(src, cfg, items, "ok", None)
         items = scraper.scrape(cfg, fetch)
         if not items and src["config"]:  # worked before, now empty -> site probably changed
             cfg = _learn_and_verify(src["url"], fetch)
@@ -90,10 +95,22 @@ def refresh_source(src, fetch=None):
         status, err = "ok", None
     except Exception as e:
         items, status, err = [], "error", str(e)[:300]
+    return _record(src, cfg, items, status, err)
+
+def _record(src, cfg, items, status, err):
     with db._listing_conn() as c:
         c.execute("UPDATE sources SET config=?, status=?, last_count=?, last_scraped=?, error=? WHERE id=?",
                   (json.dumps(cfg) if cfg else None, status, len(items), time.time(), err, src["id"]))
     return {"url": src["url"], "status": status, "listings": len(items), "error": err}
+
+def _choose_config(url, fetch):
+    """Claude-learned selectors when an API key exists; otherwise (or if learning fails) keyless crawling."""
+    if os.environ.get("ANTHROPIC_API_KEY") or agent._client is not None:
+        try:
+            return _learn_and_verify(url, fetch)
+        except Exception:
+            pass
+    return {"crawl": True, "start_url": url}
 
 def refresh_all(fetch=None):
     return [refresh_source(s, fetch) for s in list_sources()]
